@@ -1,0 +1,7 @@
+{
+    "focus_minutes": 25,
+    "break_minutes": 5,
+    "color_choice": "Black",
+    "idle_limit_minutes": 60,
+    "launch_on_startup": false
+}
