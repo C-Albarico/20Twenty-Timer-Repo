@@ -1,4 +1,4 @@
-﻿# Import necessary modules
+# Import necessary modules
 import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
@@ -63,6 +63,7 @@ class ScreenTimeLimiter:
         self.overlay = None
         self.popup_overlay = None
         self.awake_popup = None
+        self.break_screen = None
         self.stop_event = threading.Event()
 
         self.preferences = DEFAULT_PREFERENCES.copy()
@@ -104,7 +105,7 @@ class ScreenTimeLimiter:
                 if hasattr(self, 'toggle_button'):
                     self.toggle_button.config(text="Activate Timer")
             event.set()
-            self.root.after(0, popup.destroy)
+            popup.destroy()
 
         popup = tk.Toplevel(self.root)
         popup.title("Are you still there?")
@@ -130,20 +131,6 @@ class ScreenTimeLimiter:
         popup.grab_set()
 
         event.wait()
-
-    def show_break_screen(self):
-        self.overlay = tk.Toplevel(self.root)
-        self.overlay.attributes('-fullscreen', True)
-        self.overlay.configure(bg="black" if self.preferences["color_choice"] == "Black" else "white")
-        self.overlay.attributes('-topmost', True)
-        label = tk.Label(self.overlay, text="Break Time!", font=("Segoe UI", 40), fg="red", bg=self.overlay['bg'])
-        label.pack(expand=True)
-        self.overlay.after(self.break_minutes * 60 * 1000, self.end_break)
-
-    def end_break(self):
-        if self.overlay:
-            self.overlay.destroy()
-            self.overlay = None
 
     def create_widgets(self):
         container = tk.Frame(self.root, bg="#1e1e1e")
@@ -184,11 +171,35 @@ class ScreenTimeLimiter:
         self.timer_label = tk.Label(container, text="", font=("Segoe UI", 14), fg="cyan", bg="#1e1e1e")
         self.timer_label.pack(pady=10)
 
-        self.tip_label = tk.Label(container, text=random.choice(MOTIVATIONAL_QUOTES), font=("Segoe UI", 10), fg="gray", bg="#1e1e1e", wraplength=300, justify="center")
-        self.tip_label.pack(pady=10)
-
         self.toggle_button = ttk.Button(container, text="Activate Timer", command=self.toggle_timer)
         self.toggle_button.pack(pady=20)
+
+    def show_break_screen(self):
+        if self.break_screen and self.break_screen.winfo_exists():
+            return  # Already showing
+        self.break_screen = tk.Toplevel(self.root)
+        self.break_screen.overrideredirect(True)
+        self.break_screen.geometry(f"{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}+0+0")
+        self.break_screen.configure(bg="black")
+        self.break_screen.attributes("-topmost", True)
+
+        quote = random.choice(MOTIVATIONAL_QUOTES)
+        quote_label = tk.Label(
+            self.break_screen,
+            text=quote,
+            font=("Segoe UI", 20),
+            fg="white",
+            bg="black",
+            wraplength=self.root.winfo_screenwidth() - 200,
+            justify="center"
+        )
+        quote_label.place(relx=0.5, rely=0.5, anchor="center")
+
+        self.break_screen.after(self.break_minutes * 60 * 1000, self.hide_break_screen)
+
+    def hide_break_screen(self):
+        if self.break_screen and self.break_screen.winfo_exists():
+            self.break_screen.destroy()
 
     def update_timer_label(self):
         if self.running:
@@ -204,16 +215,14 @@ class ScreenTimeLimiter:
                 if not self.break_active:
                     self.break_active = True
                     self.remaining_seconds = self.break_minutes * 60
-                    self.tip_label.config(text="Break Time! Stretch or relax.")
                     winsound.MessageBeep()
                     self.show_break_screen()
                 else:
                     self.break_active = False
                     self.running = False
                     self.toggle_button.config(text="Activate Timer")
-                    self.tip_label.config(text=random.choice(MOTIVATIONAL_QUOTES))
                     self.timer_label.config(text="Focus session completed!")
-                    self.end_break()
+                    self.hide_break_screen()
         else:
             self.timer_label.config(text="Timer is paused.")
         self.root.after(1000, self.update_timer_label)
