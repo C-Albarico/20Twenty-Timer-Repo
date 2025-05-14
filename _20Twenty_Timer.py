@@ -184,10 +184,12 @@ class ScreenTimeLimiter:
         self.break_screen.attributes("-topmost", True)
 
         quote = random.choice(MOTIVATIONAL_QUOTES)
+
+        message = f"Break Time!\n\n{quote}"
         quote_label = tk.Label(
             self.break_screen,
-            text=quote,
-            font=("Segoe UI", 20),
+            text=message,
+            font=("Segoe UI", 24),
             fg="white",
             bg="black",
             wraplength=self.root.winfo_screenwidth() - 200,
@@ -195,37 +197,44 @@ class ScreenTimeLimiter:
         )
         quote_label.place(relx=0.5, rely=0.5, anchor="center")
 
-        self.break_screen.after(self.break_minutes * 60 * 1000, self.hide_break_screen)
-
     def hide_break_screen(self):
         if self.break_screen and self.break_screen.winfo_exists():
             self.break_screen.destroy()
 
     def update_timer_label(self):
-        if self.running:
-            if self.remaining_seconds > 0:
-                mins, secs = divmod(self.remaining_seconds, 60)
-                time_str = f"{mins:02d}:{secs:02d}"
-                if self.break_active:
-                    self.timer_label.config(text=f"Break: {time_str}")
-                else:
-                    self.timer_label.config(text=f"Focus: {time_str}")
-                self.remaining_seconds -= 1
+    if self.running:
+        idle_seconds = get_idle_duration_seconds()
+        if idle_seconds >= self.idle_limit_minutes * 60:
+            print(f"Idle for {idle_seconds:.0f} seconds — pausing timer for confirmation.")
+            self.running = False  # Pause timer first
+            self.timer_label.config(text="Paused due to inactivity...")
+            self.pause_for_idle_confirmation()
+            self.root.after(1000, self.update_timer_label)
+            return
+
+        if self.remaining_seconds > 0:
+            mins, secs = divmod(self.remaining_seconds, 60)
+            time_str = f"{mins:02d}:{secs:02d}"
+            if self.break_active:
+                self.timer_label.config(text=f"Break: {time_str}")
             else:
-                if not self.break_active:
-                    self.break_active = True
-                    self.remaining_seconds = self.break_minutes * 60
-                    winsound.MessageBeep()
-                    self.show_break_screen()
-                else:
-                    self.break_active = False
-                    self.running = False
-                    self.toggle_button.config(text="Activate Timer")
-                    self.timer_label.config(text="Focus session completed!")
-                    self.hide_break_screen()
+                self.timer_label.config(text=f"Focus: {time_str}")
+            self.remaining_seconds -= 1
         else:
-            self.timer_label.config(text="Timer is paused.")
-        self.root.after(1000, self.update_timer_label)
+            if not self.break_active:
+                self.break_active = True
+                self.remaining_seconds = self.break_minutes * 60
+                winsound.MessageBeep()
+                self.show_break_screen()
+            else:
+                self.break_active = False
+                self.remaining_seconds = self.focus_minutes * 60
+                self.hide_break_screen()
+    else:
+        self.timer_label.config(text="Timer is paused.")
+    self.root.after(1000, self.update_timer_label)
+
+
 
     def toggle_startup(self):
         self.preferences["launch_on_startup"] = self.launch_var.get()
