@@ -250,7 +250,7 @@ class ScreenTimeLimiter:
             try:
                 self.focus_minutes = int(self.focus_entry.get())
                 self.break_minutes = int(self.break_entry.get())
-                self.idle_limit_minutes = int(self.idle_entry.get())
+                self.idle_limit_minutes = float(self.idle_entry.get())
                 self.preferences["focus_minutes"] = self.focus_minutes
                 self.preferences["break_minutes"] = self.break_minutes
                 self.preferences["idle_limit_minutes"] = self.idle_limit_minutes
@@ -262,6 +262,8 @@ class ScreenTimeLimiter:
 
             self.total_focus_seconds = self.focus_minutes * 60
             self.total_break_seconds = self.break_minutes * 60
+            self.break_active = False
+            self.phase_changed = False
             self.end_time = time.time() + self.total_focus_seconds
 
         self.running = not self.running
