@@ -9,15 +9,15 @@ import winsound
 import random
 import sys
 import ctypes
-import ctypes.wintypes
+from ctypes import wintypes
 import subprocess
 
+# Define LASTINPUTINFO structure
+class LASTINPUTINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+
 # Utility to get idle duration
-
 def get_idle_duration_seconds():
-    class LASTINPUTINFO(ctypes.Structure):
-        _fields_ = [("cbSize", ctypes.wintypes.UINT), ("dwTime", ctypes.wintypes.DWORD)]
-
     lii = LASTINPUTINFO()
     lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
     if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
@@ -65,6 +65,7 @@ class ScreenTimeLimiter:
         self.awake_popup = None
         self.break_screen = None
         self.stop_event = threading.Event()
+        self.phase_changed = False
 
         self.preferences = DEFAULT_PREFERENCES.copy()
         self.load_preferences()
@@ -72,7 +73,10 @@ class ScreenTimeLimiter:
         self.break_minutes = self.preferences["break_minutes"]
         self.idle_limit_minutes = self.preferences["idle_limit_minutes"]
 
-        self.remaining_seconds = self.focus_minutes * 60
+        self.total_focus_seconds = self.focus_minutes * 60
+        self.total_break_seconds = self.break_minutes * 60
+        self.end_time = None
+
         self.create_widgets()
         self.update_timer_label()
 
@@ -94,17 +98,16 @@ class ScreenTimeLimiter:
             print(f"Error saving config: {e}")
 
     def pause_for_idle_confirmation(self):
-        event = threading.Event()
-
         def on_response(response):
             if response == "yes":
                 print("User is awake. Resuming timer.")
+                self.running = True
+                self.end_time = time.time() + self.remaining_seconds()
             else:
                 print("User is not awake. Stopping timer.")
                 self.running = False
                 if hasattr(self, 'toggle_button'):
                     self.toggle_button.config(text="Activate Timer")
-            event.set()
             popup.destroy()
 
         popup = tk.Toplevel(self.root)
@@ -130,7 +133,7 @@ class ScreenTimeLimiter:
         popup.protocol("WM_DELETE_WINDOW", lambda: on_response("no"))
         popup.grab_set()
 
-        event.wait()
+        self.root.wait_window(popup)
 
     def create_widgets(self):
         container = tk.Frame(self.root, bg="#1e1e1e")
@@ -184,10 +187,12 @@ class ScreenTimeLimiter:
         self.break_screen.attributes("-topmost", True)
 
         quote = random.choice(MOTIVATIONAL_QUOTES)
+
+        message = f"Break Time!\n\n{quote}"
         quote_label = tk.Label(
             self.break_screen,
-            text=quote,
-            font=("Segoe UI", 20),
+            text=message,
+            font=("Segoe UI", 24),
             fg="white",
             bg="black",
             wraplength=self.root.winfo_screenwidth() - 200,
@@ -195,36 +200,45 @@ class ScreenTimeLimiter:
         )
         quote_label.place(relx=0.5, rely=0.5, anchor="center")
 
-        self.break_screen.after(self.break_minutes * 60 * 1000, self.hide_break_screen)
-
     def hide_break_screen(self):
         if self.break_screen and self.break_screen.winfo_exists():
             self.break_screen.destroy()
 
+    def remaining_seconds(self):
+        return max(0, int(self.end_time - time.time())) if self.end_time else 0
+
     def update_timer_label(self):
         if self.running:
-            if self.remaining_seconds > 0:
-                mins, secs = divmod(self.remaining_seconds, 60)
-                time_str = f"{mins:02d}:{secs:02d}"
-                if self.break_active:
-                    self.timer_label.config(text=f"Break: {time_str}")
-                else:
-                    self.timer_label.config(text=f"Focus: {time_str}")
-                self.remaining_seconds -= 1
+            idle_seconds = get_idle_duration_seconds()
+            if not self.break_active and idle_seconds >= self.idle_limit_minutes * 60:
+                print(f"Idle for {idle_seconds:.0f} seconds — pausing timer for confirmation.")
+                self.running = False
+                self.timer_label.config(text="Paused due to inactivity...")
+                self.pause_for_idle_confirmation()
+                self.root.after(1000, self.update_timer_label)
+                return
+
+            remaining = self.remaining_seconds()
+            if remaining > 0:
+                mins, secs = divmod(remaining, 60)
+                label = f"Break: {mins:02d}:{secs:02d}" if self.break_active else f"Focus: {mins:02d}:{secs:02d}"
+                self.timer_label.config(text=label)
+                self.phase_changed = False
             else:
-                if not self.break_active:
-                    self.break_active = True
-                    self.remaining_seconds = self.break_minutes * 60
-                    winsound.MessageBeep()
-                    self.show_break_screen()
-                else:
-                    self.break_active = False
-                    self.running = False
-                    self.toggle_button.config(text="Activate Timer")
-                    self.timer_label.config(text="Focus session completed!")
-                    self.hide_break_screen()
+                if not self.phase_changed:
+                    self.phase_changed = True
+                    if not self.break_active:
+                        self.break_active = True
+                        self.end_time = time.time() + self.total_break_seconds
+                        winsound.MessageBeep()
+                        self.show_break_screen()
+                    else:
+                        self.break_active = False
+                        self.end_time = time.time() + self.total_focus_seconds
+                        self.hide_break_screen()
         else:
             self.timer_label.config(text="Timer is paused.")
+
         self.root.after(1000, self.update_timer_label)
 
     def toggle_startup(self):
@@ -236,15 +250,28 @@ class ScreenTimeLimiter:
             try:
                 self.focus_minutes = int(self.focus_entry.get())
                 self.break_minutes = int(self.break_entry.get())
-                self.idle_limit_minutes = int(self.idle_entry.get())
+                self.idle_limit_minutes = float(self.idle_entry.get())
+                self.preferences["focus_minutes"] = self.focus_minutes
+                self.preferences["break_minutes"] = self.break_minutes
+                self.preferences["idle_limit_minutes"] = self.idle_limit_minutes
+                self.save_preferences()
             except ValueError:
                 self.focus_minutes = DEFAULT_PREFERENCES["focus_minutes"]
                 self.break_minutes = DEFAULT_PREFERENCES["break_minutes"]
                 self.idle_limit_minutes = DEFAULT_PREFERENCES["idle_limit_minutes"]
-            self.remaining_seconds = self.focus_minutes * 60
+
+            self.total_focus_seconds = self.focus_minutes * 60
+            self.total_break_seconds = self.break_minutes * 60
+            self.break_active = False
+            self.phase_changed = False
+            self.end_time = time.time() + self.total_focus_seconds
+
         self.running = not self.running
         state = "Deactivate" if self.running else "Activate"
         self.toggle_button.config(text=f"{state} Timer")
+
+        if self.running:
+            self.update_timer_label()
 
 if __name__ == '__main__':
     root = tk.Tk()
